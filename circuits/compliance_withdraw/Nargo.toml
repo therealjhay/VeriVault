@@ -1,0 +1,6 @@
+[package]
+name = "compliance_withdraw"
+type = "bin"
+authors = [""]
+
+[dependencies]

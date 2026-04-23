@@ -1,0 +1,2 @@
+[workspace]
+members = ["circuits/compliance_withdraw", "circuits/attribute_proof", "circuits/merkle", "circuits/lib/policy"]

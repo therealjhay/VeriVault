@@ -1,0 +1,6 @@
+[package]
+name = "attribute_proof"
+type = "bin"
+authors = [""]
+
+[dependencies]
