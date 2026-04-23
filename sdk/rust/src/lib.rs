@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod client;
+
+pub use client::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn test_client_init() {
+        let client = VeriVaultClient::new("http://localhost".into(), "contract".into());
+        let note = client.create_note(100, ComplianceAttributes { kyc_level: 1, geo_region: "US".into() });
+        assert_eq!(note.amount, 100);
     }
 }

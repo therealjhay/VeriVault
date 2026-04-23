@@ -2,5 +2,8 @@
 name = "compliance_withdraw"
 type = "bin"
 authors = [""]
+compiler_version = ">=0.36.0"
 
 [dependencies]
+merkle = { path = "../merkle" }
+policy = { path = "../lib/policy" }

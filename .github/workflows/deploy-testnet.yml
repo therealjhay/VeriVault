@@ -1,0 +1,28 @@
+name: Deploy to Testnet
+
+on:
+  push:
+    branches: [ main ]
+    paths: ['contracts/**', 'circuits/**']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          
+      - name: Build circuits + contracts
+        run: cargo build --workspace --target wasm32-unknown-unknown --release
+          
+      - name: Deploy to Stellar Testnet
+        env:
+          STELLAR_SECRET: ${{ secrets.TESTNET_SECRET }}
+        run: |
+          # Example deployment
+          echo "Deploying to testnet..."
