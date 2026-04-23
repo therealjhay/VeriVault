@@ -1,0 +1,12 @@
+[workspace]
+members = ["contracts/verivault_pool", "sdk/rust"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+soroban-sdk = "22.0"
+soroban-token-sdk = "22.0"
