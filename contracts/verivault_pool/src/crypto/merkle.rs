@@ -3,11 +3,6 @@ use crate::crypto::poseidon::Poseidon2;
 
 pub const TREE_DEPTH: u32 = 20;
 
-pub struct IncrementalMerkle {
-    env: Env,
-    storage_key: Symbol,
-}
-
 #[derive(Clone, Debug)]
 #[contracttype]
 pub struct MerkleProof {
@@ -15,51 +10,72 @@ pub struct MerkleProof {
     pub siblings: Vec<BytesN<32>>,
 }
 
+pub struct IncrementalMerkle {
+    env: Env,
+}
+
 impl IncrementalMerkle {
-    pub fn new(env: &Env, storage_key: Symbol) -> Self {
-        Self {
-            env: env.clone(),
-            storage_key,
-        }
+    pub fn new(env: &Env) -> Self {
+        Self { env: env.clone() }
     }
-    
-    pub fn insert(&mut self, leaf: BytesN<32>) -> MerkleProof {
-        let mut siblings = Vec::new(&self.env);
-        for _ in 0..TREE_DEPTH {
-            siblings.push_back(self.zero_hash());
-        }
+
+    /// Returns the current root of the tree.
+    /// In a real implementation, we would store the 'filled_subtrees' in persistent storage.
+    pub fn get_root(&self) -> BytesN<32> {
+        let subtrees = self.get_filled_subtrees();
+        let mut current_hash = subtrees.get(0).unwrap_or(self.zero_hash(0));
         
+        // This is a simplified version; a true incremental tree maintains 
+        // the root by hashing the filled subtrees with zeros for the remaining path.
+        for i in 0..TREE_DEPTH {
+            current_hash = self.hash_pair(current_hash, self.zero_hash(i));
+        }
+        current_hash
+    }
+
+    pub fn insert(&mut self, leaf: BytesN<32>, index: u32) -> MerkleProof {
+        let mut subtrees = self.get_filled_subtrees();
+        let mut siblings = Vec::new(&self.env);
+        let mut current_hash = leaf;
+
+        for i in 0..TREE_DEPTH {
+            if (index >> i) & 1 == 1 {
+                let left = subtrees.get(i).unwrap();
+                current_hash = self.hash_pair(left, current_hash);
+            } else {
+                subtrees.set(i, current_hash.clone());
+                current_hash = self.hash_pair(current_hash, self.zero_hash(i));
+            }
+            siblings.push_back(self.zero_hash(i));
+        }
+
+        self.set_filled_subtrees(subtrees);
+
         MerkleProof {
-            leaf_index: 0,
+            leaf_index: index,
             siblings,
         }
     }
-    
-    pub fn verify(&self, leaf: BytesN<32>, proof: &MerkleProof) -> bool {
-        let mut computed_hash = leaf;
-        for i in 0..TREE_DEPTH {
-            let sibling = proof.siblings.get(i).unwrap();
-            let bit = (proof.leaf_index >> i) & 1;
-            
-            let mut preimage = [0u8; 64];
-            if bit == 0 {
-                preimage[..32].copy_from_slice(&computed_hash.to_array());
-                preimage[32..].copy_from_slice(&sibling.to_array());
-            } else {
-                preimage[..32].copy_from_slice(&sibling.to_array());
-                preimage[32..].copy_from_slice(&computed_hash.to_array());
-            }
-            let bytes = Bytes::from_array(&self.env, &preimage);
-            computed_hash = Poseidon2::hash_chunks(&self.env, bytes);
-        }
-        computed_hash.to_array() == self.zero_hash().to_array()
+
+    fn hash_pair(&self, left: BytesN<32>, right: BytesN<32>) -> BytesN<32> {
+        let mut preimage = [0u8; 64];
+        preimage[..32].copy_from_slice(&left.to_array());
+        preimage[32..].copy_from_slice(&right.to_array());
+        Poseidon2::hash_chunks(&self.env, Bytes::from_array(&self.env, &preimage))
     }
-    
-    pub fn root(&self) -> BytesN<32> {
-        self.zero_hash()
-    }
-    
-    fn zero_hash(&self) -> BytesN<32> {
+
+    fn zero_hash(&self, _level: u32) -> BytesN<32> {
+        // In production, these should be precomputed
         BytesN::from_array(&self.env, &[0u8; 32])
+    }
+
+    fn get_filled_subtrees(&self) -> Vec<BytesN<32>> {
+        self.env.storage().persistent()
+            .get(&Symbol::new(&self.env, "subtrees"))
+            .unwrap_or(Vec::new(&self.env))
+    }
+
+    fn set_filled_subtrees(&self, subtrees: Vec<BytesN<32>>) {
+        self.env.storage().persistent().set(&Symbol::new(&self.env, "subtrees"), &subtrees);
     }
 }

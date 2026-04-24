@@ -1,11 +1,18 @@
 use soroban_sdk::{contract, contractimpl, contracterror, Address, BytesN, Bytes, Env, Vec};
+use crate::storage::state::{ContractState, StorageKey};
+use crate::core::{deposit, withdraw, policy, recovery};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
-    ProofVerificationFailed = 1,
-    NullifierAlreadySpent = 2,
+    AlreadyInitialized = 0,
+    NotInitialized = 1,
+    ProofVerificationFailed = 2,
+    NullifierAlreadySpent = 3,
+    Unauthorized = 4,
+    InvalidAmount = 5,
+    InvalidPublicInputs = 6,
 }
 
 #[contract]
@@ -19,23 +26,37 @@ impl VeriVault {
         asset: Address,
         policy_root: BytesN<32>,
         guardian_set: Vec<Address>
-    ) {
-        env.storage().instance().set(&soroban_sdk::Symbol::new(&env, "admin"), &admin);
-        env.storage().instance().set(&soroban_sdk::Symbol::new(&env, "asset"), &asset);
-        env.storage().instance().set(&soroban_sdk::Symbol::new(&env, "policy_root"), &policy_root);
-        env.storage().instance().set(&soroban_sdk::Symbol::new(&env, "guardians"), &guardian_set);
+    ) -> Result<(), ContractError> {
+        if env.storage().instance().has(&StorageKey::State) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        let state = ContractState {
+            admin,
+            asset,
+            merkle_root: BytesN::from_array(&env, &[0u8; 32]),
+            policy_root,
+            next_recovery_id: 0,
+            guardians: guardian_set,
+            recovery_timelock: 86400, // 24 hours
+        };
+
+        env.storage().instance().set(&StorageKey::State, &state);
+        env.storage().persistent().set(&StorageKey::NextLeafIndex, &0u32);
+        
+        Ok(())
     }
-    
+
     pub fn deposit(
         env: Env,
         user: Address,
         amount: i128,
         commitment: BytesN<32>,
         encrypted_metadata: BytesN<64>
-    ) {
-        user.require_auth();
+    ) -> Result<(), ContractError> {
+        deposit::execute_deposit(&env, user, amount, commitment, encrypted_metadata)
     }
-    
+
     pub fn withdraw(
         env: Env,
         proof: Bytes,
@@ -43,49 +64,31 @@ impl VeriVault {
         recipient: Address,
         amount: i128
     ) -> Result<(), ContractError> {
-        let nullifier_hash = public_inputs.get(3).unwrap();
-        if Self::is_nullifier_spent(env.clone(), nullifier_hash.clone()) {
-            return Err(ContractError::NullifierAlreadySpent);
-        }
-        
-        env.storage().persistent().set(&soroban_sdk::Symbol::new(&env, "nullifier"), &nullifier_hash);
-        Ok(())
+        withdraw::execute_withdraw(&env, proof, public_inputs, recipient, amount)
     }
-    
-    pub fn disclose(
+
+    pub fn update_policy_root(
         env: Env,
-        note_secret: BytesN<32>,
-        attrs_to_reveal: Bytes,
-        signature: BytesN<64>
-    ) {}
-    
-    pub fn update_policy(
-        env: Env,
-        new_root: BytesN<32>,
-        effective_after: u64
-    ) {}
-    
+        new_policy_root: BytesN<32>
+    ) -> Result<(), ContractError> {
+        policy::update_policy_root(&env, new_policy_root)
+    }
+
     pub fn initiate_recovery(
         env: Env,
-        user_commitment: BytesN<32>,
-        new_nullifier: BytesN<32>
-    ) {}
-    
-    pub fn finalize_recovery(
-        env: Env,
-        recovery_id: u64,
-        guardian_sigs: Vec<BytesN<64>>
-    ) {}
-    
-    pub fn get_root(env: Env) -> BytesN<32> {
-        BytesN::from_array(&env, &[0u8; 32])
+        guardian: Address
+    ) -> Result<(), ContractError> {
+        recovery::initiate_recovery(&env, guardian)
     }
-    
-    pub fn is_nullifier_spent(env: Env, nullifier_hash: BytesN<32>) -> bool {
-        env.storage().persistent().has(&soroban_sdk::Symbol::new(&env, "nullifier"))
+
+    pub fn get_root(env: Env) -> Result<BytesN<32>, ContractError> {
+        let state = Self::get_state(&env)?;
+        Ok(state.merkle_root)
     }
-    
-    pub fn get_policy_root(env: Env) -> BytesN<32> {
-        BytesN::from_array(&env, &[0u8; 32])
+
+    fn get_state(env: &Env) -> Result<ContractState, ContractError> {
+        env.storage().instance()
+            .get(&StorageKey::State)
+            .ok_or(ContractError::NotInitialized)
     }
 }
